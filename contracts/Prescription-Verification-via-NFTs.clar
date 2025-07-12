@@ -31,6 +31,8 @@
         expiry-date: uint,
         filled: bool,
         pharmacy: (optional principal),
+        max-refills: uint,
+        remaining-quantity: uint,
     }
 )
 
@@ -51,6 +53,8 @@
 (define-constant err-expired (err u103))
 (define-constant err-invalid-quantity (err u104))
 (define-constant err-invalid-validity (err u105))
+(define-constant err-insufficient-quantity (err u106))
+(define-constant err-no-refills-remaining (err u107))
 
 (define-public (authorize-doctor (doctor principal))
     (begin
@@ -80,6 +84,7 @@
         (dosage (string-ascii 32))
         (quantity uint)
         (validity-days uint)
+        (max-refills uint)
     )
     (let (
             (is-doc (is-doctor tx-sender))
@@ -101,29 +106,50 @@
             expiry-date: expiry,
             filled: false,
             pharmacy: none,
+            max-refills: max-refills,
+            remaining-quantity: quantity,
         })
         (var-set last-prescription-id id)
         (ok id)
     )
 )
 
-(define-public (fill-prescription (id uint))
+(define-public (fill-prescription
+        (id uint)
+        (requested-quantity uint)
+    )
     (let (
             (presc (unwrap! (map-get? prescriptions { id: id }) err-invalid-prescription))
             (is-pharm (is-pharmacy tx-sender))
             (now stacks-block-height)
+            (current-remaining (get remaining-quantity presc))
+            (max-refills (get max-refills presc))
+            (new-remaining (- current-remaining requested-quantity))
         )
         (asserts! is-pharm err-not-authorized)
-        (asserts! (not (get filled presc)) err-already-filled)
         (asserts! (< now (get expiry-date presc)) err-expired)
-        (try! (nft-transfer? prescription-nft id (get patient presc) tx-sender))
+        (asserts! (> requested-quantity u0) err-invalid-quantity)
+        (asserts! (<= requested-quantity current-remaining)
+            err-insufficient-quantity
+        )
+        (asserts! (> max-refills u0) err-no-refills-remaining)
+        (if (and (is-eq new-remaining u0) (not (get filled presc)))
+            (try! (nft-transfer? prescription-nft id (get patient presc) tx-sender))
+            true
+        )
         (map-set prescriptions { id: id }
             (merge presc {
-                filled: true,
+                filled: (is-eq new-remaining u0),
                 pharmacy: (some tx-sender),
+                max-refills: (- max-refills u1),
+                remaining-quantity: new-remaining,
             })
         )
-        (ok true)
+        (ok {
+            dispensed-quantity: requested-quantity,
+            remaining-quantity: new-remaining,
+            refills-left: (- max-refills u1),
+        })
     )
 )
 
@@ -131,10 +157,25 @@
     (match (map-get? prescriptions { id: id })
         presc (ok {
             is-valid: (and
-                (not (get filled presc))
+                (> (get remaining-quantity presc) u0)
+                (> (get max-refills presc) u0)
                 (< stacks-block-height (get expiry-date presc))
             ),
             details: presc,
+        })
+        err-invalid-prescription
+    )
+)
+
+(define-read-only (get-refill-history (id uint))
+    (match (map-get? prescriptions { id: id })
+        presc (ok {
+            total-quantity: (get quantity presc),
+            remaining-quantity: (get remaining-quantity presc),
+            dispensed-quantity: (- (get quantity presc) (get remaining-quantity presc)),
+            refills-used: (- (get quantity presc) (get max-refills presc)),
+            refills-remaining: (get max-refills presc),
+            last-pharmacy: (get pharmacy presc),
         })
         err-invalid-prescription
     )

@@ -55,6 +55,8 @@
 (define-constant err-invalid-validity (err u105))
 (define-constant err-insufficient-quantity (err u106))
 (define-constant err-no-refills-remaining (err u107))
+(define-constant err-not-owner (err u108))
+(define-constant err-transfer-to-self (err u109))
 
 (define-public (authorize-doctor (doctor principal))
     (begin
@@ -178,5 +180,25 @@
             last-pharmacy: (get pharmacy presc),
         })
         err-invalid-prescription
+    )
+)
+
+(define-public (transfer-prescription
+        (id uint)
+        (new-patient principal)
+    )
+    (let (
+            (presc (unwrap! (map-get? prescriptions { id: id }) err-invalid-prescription))
+            (current-owner (unwrap! (nft-get-owner? prescription-nft id)
+                err-invalid-prescription
+            ))
+        )
+        (asserts! (is-eq tx-sender current-owner) err-not-owner)
+        (asserts! (not (is-eq tx-sender new-patient)) err-transfer-to-self)
+        (asserts! (not (get filled presc)) err-already-filled)
+        (asserts! (< stacks-block-height (get expiry-date presc)) err-expired)
+        (try! (nft-transfer? prescription-nft id tx-sender new-patient))
+        (map-set prescriptions { id: id } (merge presc { patient: new-patient }))
+        (ok true)
     )
 )

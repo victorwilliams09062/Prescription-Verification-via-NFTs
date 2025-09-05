@@ -37,6 +37,7 @@
 )
 
 (define-data-var last-prescription-id uint u0)
+(define-data-var audit-entry-id uint u0)
 
 (define-map authorized-doctors
     { doctor: principal }
@@ -45,6 +46,17 @@
 (define-map authorized-pharmacies
     { pharmacy: principal }
     bool
+)
+
+(define-map audit-trail
+    { entry-id: uint }
+    {
+        prescription-id: uint,
+        action: (string-ascii 20),
+        actor: principal,
+        timestamp: uint,
+        details: (string-ascii 100),
+    }
 )
 
 (define-constant err-not-authorized (err u100))
@@ -80,6 +92,24 @@
     (default-to false (map-get? authorized-pharmacies { pharmacy: sender }))
 )
 
+(define-private (log-audit-entry
+        (prescription-id uint)
+        (action (string-ascii 20))
+        (details (string-ascii 100))
+    )
+    (let ((entry-id (+ (var-get audit-entry-id) u1)))
+        (map-set audit-trail { entry-id: entry-id } {
+            prescription-id: prescription-id,
+            action: action,
+            actor: tx-sender,
+            timestamp: stacks-block-height,
+            details: details,
+        })
+        (var-set audit-entry-id entry-id)
+        entry-id
+    )
+)
+
 (define-public (issue-prescription
         (patient principal)
         (drug-name (string-ascii 64))
@@ -112,6 +142,7 @@
             remaining-quantity: quantity,
         })
         (var-set last-prescription-id id)
+        (log-audit-entry id "issued" "prescription created")
         (ok id)
     )
 )
@@ -146,6 +177,9 @@
                 max-refills: (- max-refills u1),
                 remaining-quantity: new-remaining,
             })
+        )
+        (log-audit-entry id "filled"
+            (concat "dispensed:" (int-to-ascii requested-quantity))
         )
         (ok {
             dispensed-quantity: requested-quantity,
@@ -199,6 +233,50 @@
         (asserts! (< stacks-block-height (get expiry-date presc)) err-expired)
         (try! (nft-transfer? prescription-nft id tx-sender new-patient))
         (map-set prescriptions { id: id } (merge presc { patient: new-patient }))
+        (log-audit-entry id "transferred" "patient changed")
         (ok true)
+    )
+)
+
+(define-read-only (get-prescription-audit-count (prescription-id uint))
+    (let ((current-audit-id (var-get audit-entry-id)))
+        (ok (fold count-prescription-entries
+            (list
+                u1                 u2                 u3                 u4
+                                u5                 u6                 u7                 u8
+                                u9                 u10                 u11                 u12
+                                u13                 u14                 u15                 u16
+                                u17                 u18
+                u19                 u20
+            ) {
+            target-id: prescription-id,
+            count: u0,
+        }))
+    )
+)
+
+(define-private (count-prescription-entries
+        (entry-id uint)
+        (acc {
+            target-id: uint,
+            count: uint,
+        })
+    )
+    (match (map-get? audit-trail { entry-id: entry-id })
+        entry (if (is-eq (get prescription-id entry) (get target-id acc))
+            {
+                target-id: (get target-id acc),
+                count: (+ (get count acc) u1),
+            }
+            acc
+        )
+        acc
+    )
+)
+
+(define-read-only (get-audit-entry (entry-id uint))
+    (match (map-get? audit-trail { entry-id: entry-id })
+        entry (ok entry)
+        err-invalid-prescription
     )
 )

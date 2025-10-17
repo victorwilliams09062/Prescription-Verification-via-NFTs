@@ -61,6 +61,18 @@
     }
 )
 
+(define-map prescription-delegates
+    {
+        prescription-id: uint,
+        delegate: principal,
+    }
+    {
+        delegator: principal,
+        granted-at: uint,
+        active: bool,
+    }
+)
+
 (define-constant err-not-authorized (err u100))
 (define-constant err-invalid-prescription (err u101))
 (define-constant err-already-filled (err u102))
@@ -73,6 +85,9 @@
 (define-constant err-transfer-to-self (err u109))
 (define-constant err-already-revoked (err u110))
 (define-constant err-cannot-revoke-filled (err u111))
+(define-constant err-already-delegated (err u112))
+(define-constant err-not-delegated (err u113))
+(define-constant err-delegation-to-self (err u114))
 
 (define-public (authorize-doctor (doctor principal))
     (begin
@@ -150,6 +165,24 @@
         (var-set last-prescription-id id)
         (log-audit-entry id "issued" "prescription created")
         (ok id)
+    )
+)
+
+(define-private (is-authorized-for-prescription
+        (id uint)
+        (actor principal)
+    )
+    (let ((presc (unwrap! (map-get? prescriptions { id: id }) false)))
+        (or
+            (is-eq actor (get patient presc))
+            (match (map-get? prescription-delegates {
+                prescription-id: id,
+                delegate: actor,
+            })
+                delegation (get active delegation)
+                false
+            )
+        )
     )
 )
 
@@ -249,8 +282,14 @@
 (define-read-only (get-prescription-audit-count (prescription-id uint))
     (let ((current-audit-id (var-get audit-entry-id)))
         (ok (fold count-prescription-entries
-            (list u1 u2 u3 u4 u5 u6 u7 u8 u9 u10 u11 u12 u13 u14 u15 u16 u17 u18
-                u19 u20) {
+            (list
+                u1                 u2                 u3                 u4
+                u5                 u6                 u7                 u8
+                u9                 u10                 u11                 u12
+                u13                 u14                 u15                 u16
+                u17                 u18
+                u19                 u20
+            ) {
             target-id: prescription-id,
             count: u0,
         }))
@@ -306,5 +345,98 @@
     (match (map-get? prescriptions { id: id })
         presc (ok (get revoked presc))
         err-invalid-prescription
+    )
+)
+
+(define-public (delegate-prescription-pickup
+        (prescription-id uint)
+        (delegate principal)
+    )
+    (let (
+            (presc (unwrap! (map-get? prescriptions { id: prescription-id })
+                err-invalid-prescription
+            ))
+            (current-owner (unwrap! (nft-get-owner? prescription-nft prescription-id)
+                err-invalid-prescription
+            ))
+            (existing-delegation (map-get? prescription-delegates {
+                prescription-id: prescription-id,
+                delegate: delegate,
+            }))
+        )
+        (asserts! (is-eq tx-sender current-owner) err-not-owner)
+        (asserts! (not (is-eq tx-sender delegate)) err-delegation-to-self)
+        (asserts! (not (get filled presc)) err-already-filled)
+        (asserts! (is-none existing-delegation) err-already-delegated)
+        (map-set prescription-delegates {
+            prescription-id: prescription-id,
+            delegate: delegate,
+        } {
+            delegator: tx-sender,
+            granted-at: stacks-block-height,
+            active: true,
+        })
+        (log-audit-entry prescription-id "delegated" "pickup rights granted")
+        (ok true)
+    )
+)
+
+(define-public (revoke-delegation
+        (prescription-id uint)
+        (delegate principal)
+    )
+    (let (
+            (presc (unwrap! (map-get? prescriptions { id: prescription-id })
+                err-invalid-prescription
+            ))
+            (current-owner (unwrap! (nft-get-owner? prescription-nft prescription-id)
+                err-invalid-prescription
+            ))
+            (delegation (unwrap!
+                (map-get? prescription-delegates {
+                    prescription-id: prescription-id,
+                    delegate: delegate,
+                })
+                err-not-delegated
+            ))
+        )
+        (asserts! (is-eq tx-sender current-owner) err-not-owner)
+        (asserts! (get active delegation) err-not-delegated)
+        (map-set prescription-delegates {
+            prescription-id: prescription-id,
+            delegate: delegate,
+        }
+            (merge delegation { active: false })
+        )
+        (log-audit-entry prescription-id "revoked-delegation"
+            "pickup rights revoked"
+        )
+        (ok true)
+    )
+)
+
+(define-read-only (is-delegated-for-prescription
+        (prescription-id uint)
+        (delegate principal)
+    )
+    (match (map-get? prescription-delegates {
+        prescription-id: prescription-id,
+        delegate: delegate,
+    })
+        delegation (ok (get active delegation))
+        (ok false)
+    )
+)
+
+(define-read-only (get-delegation-info
+        (prescription-id uint)
+        (delegate principal)
+    )
+    (match (map-get? prescription-delegates {
+        prescription-id: prescription-id,
+        delegate: delegate,
+    })
+        delegation (ok delegation)
+        err-not-delegated
     )
 )

@@ -249,14 +249,8 @@
 (define-read-only (get-prescription-audit-count (prescription-id uint))
     (let ((current-audit-id (var-get audit-entry-id)))
         (ok (fold count-prescription-entries
-            (list
-                u1                 u2                 u3                 u4
-                u5                 u6                 u7                 u8
-                u9                 u10                 u11                 u12
-                u13                 u14                 u15                 u16
-                u17                 u18
-                u19                 u20
-            ) {
+            (list u1 u2 u3 u4 u5 u6 u7 u8 u9 u10 u11 u12 u13 u14 u15 u16 u17 u18
+                u19 u20) {
             target-id: prescription-id,
             count: u0,
         }))

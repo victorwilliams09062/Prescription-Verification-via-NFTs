@@ -33,6 +33,8 @@
         pharmacy: (optional principal),
         max-refills: uint,
         remaining-quantity: uint,
+        revoked: bool,
+        revocation-reason: (optional (string-ascii 100)),
     }
 )
 
@@ -69,6 +71,8 @@
 (define-constant err-no-refills-remaining (err u107))
 (define-constant err-not-owner (err u108))
 (define-constant err-transfer-to-self (err u109))
+(define-constant err-already-revoked (err u110))
+(define-constant err-cannot-revoke-filled (err u111))
 
 (define-public (authorize-doctor (doctor principal))
     (begin
@@ -140,6 +144,8 @@
             pharmacy: none,
             max-refills: max-refills,
             remaining-quantity: quantity,
+            revoked: false,
+            revocation-reason: none,
         })
         (var-set last-prescription-id id)
         (log-audit-entry id "issued" "prescription created")
@@ -160,6 +166,7 @@
             (new-remaining (- current-remaining requested-quantity))
         )
         (asserts! is-pharm err-not-authorized)
+        (asserts! (not (get revoked presc)) err-already-revoked)
         (asserts! (< now (get expiry-date presc)) err-expired)
         (asserts! (> requested-quantity u0) err-invalid-quantity)
         (asserts! (<= requested-quantity current-remaining)
@@ -196,6 +203,7 @@
                 (> (get remaining-quantity presc) u0)
                 (> (get max-refills presc) u0)
                 (< stacks-block-height (get expiry-date presc))
+                (not (get revoked presc))
             ),
             details: presc,
         })
@@ -243,10 +251,10 @@
         (ok (fold count-prescription-entries
             (list
                 u1                 u2                 u3                 u4
-                                u5                 u6                 u7                 u8
-                                u9                 u10                 u11                 u12
-                                u13                 u14                 u15                 u16
-                                u17                 u18
+                u5                 u6                 u7                 u8
+                u9                 u10                 u11                 u12
+                u13                 u14                 u15                 u16
+                u17                 u18
                 u19                 u20
             ) {
             target-id: prescription-id,
@@ -277,6 +285,32 @@
 (define-read-only (get-audit-entry (entry-id uint))
     (match (map-get? audit-trail { entry-id: entry-id })
         entry (ok entry)
+        err-invalid-prescription
+    )
+)
+
+(define-public (revoke-prescription
+        (id uint)
+        (reason (string-ascii 100))
+    )
+    (let ((presc (unwrap! (map-get? prescriptions { id: id }) err-invalid-prescription)))
+        (asserts! (is-eq tx-sender (get doctor presc)) err-not-authorized)
+        (asserts! (not (get revoked presc)) err-already-revoked)
+        (asserts! (not (get filled presc)) err-cannot-revoke-filled)
+        (map-set prescriptions { id: id }
+            (merge presc {
+                revoked: true,
+                revocation-reason: (some reason),
+            })
+        )
+        (log-audit-entry id "revoked" reason)
+        (ok true)
+    )
+)
+
+(define-read-only (is-prescription-revoked (id uint))
+    (match (map-get? prescriptions { id: id })
+        presc (ok (get revoked presc))
         err-invalid-prescription
     )
 )

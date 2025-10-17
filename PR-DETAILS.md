@@ -1,71 +1,47 @@
-# Prescription Audit Trail System - Enhanced Compliance & Traceability
+# Enhancement: Prescription Revocation System
 
 ## Overview
-
-Introduces immutable audit trail functionality to track all prescription lifecycle events. This enhancement strengthens regulatory compliance and provides comprehensive traceability for healthcare operations.
+Critical safety feature enabling doctors to revoke prescriptions before pharmacy fill - essential for medical errors, drug interactions, or patient safety concerns.
 
 ## Technical Implementation
 
-### Core Components
+### New Error Constants
+- `err-already-revoked (u110)`: Prevents duplicate revocation
+- `err-cannot-revoke-filled (u111)`: Protects filled prescriptions
 
-**Audit Trail Storage**
-- `audit-trail` map: Stores audit entries keyed by entry-id
-- `audit-entry-id` data-var: Auto-incrementing counter for entries
-- Entry structure: prescription-id, action, actor, timestamp, details
+### Prescription Schema Changes
+Extended prescription map with:
+- `revoked: bool` - Revocation status flag
+- `revocation-reason: (optional (string-ascii 100))` - Doctor's documented reason
 
-**Logging Function**
-- `log-audit-entry`: Private function that creates audit records
-- Automatically captures tx-sender as actor
-- Records block height as timestamp
-- Returns entry-id for reference
+### Core Functions
 
-**Query Functions**
-- `get-audit-entry`: Retrieves specific audit entry by ID
-- `get-prescription-audit-count`: Counts audit entries for a prescription
-- `count-prescription-entries`: Helper function for aggregation
+**revoke-prescription**
+- Doctor-only authorization check
+- Validates prescription exists and unfilled
+- Records revocation reason
+- Logs audit entry
+- Prevents pharmacy from filling
 
-### Integration Points
+**is-prescription-revoked**
+- Read-only query for revocation status
+- Returns boolean result
 
-**Prescription Issuance** (issue-prescription)
-- Logs "issued" action when prescription is created
-- Captures issuing doctor as actor
-
-**Pharmacy Fills** (fill-prescription)
-- Logs "filled" action with dispensed quantity
-- Records pharmacy as actor
-
-**Patient Transfers** (transfer-prescription)
-- Logs "transferred" action when ownership changes
-- Records original patient as actor
-
-## Features
-
-✅ Automatic logging of prescription issuance, fills, and transfers
-✅ Timestamped audit entries with actor identification  
-✅ Query functions for audit trail retrieval and analysis
-✅ Self-contained implementation with minimal overhead
-✅ Zero breaking changes to existing functionality
-
-## Benefits
-
-- **Regulatory Compliance**: Meets healthcare audit requirements
-- **Dispute Resolution**: Complete activity history for investigations
-- **Transparency**: Enhanced visibility for patients and providers
-- **Analytics Foundation**: Enables reporting and trend analysis
-- **Immutability**: Blockchain-backed audit records
+### Integration Updates
+- `fill-prescription`: Blocks filling revoked prescriptions
+- `verify-prescription`: Includes revocation in validity check
+- `issue-prescription`: Initializes revoked=false for new prescriptions
 
 ## Testing Results
-
 ```
-✔ 1 contract checked
-⚠ 10 warnings (expected - untrusted input warnings)
-✅ Zero compilation errors
+✔ clarinet check - 13 warnings (expected unchecked data)
+✔ npm test - 1 test passed
+✔ Zero compilation errors
 ```
 
-## Code Quality
-
-- Clean, minimal implementation
-- No comments (self-documenting code)
-- Proper error handling
-- Follows existing code patterns
-- Clarity v3 compatible
+## Benefits
+✅ Patient safety through error correction
+✅ Regulatory compliance for prescription management  
+✅ Audit trail for medical liability protection
+✅ Zero breaking changes to existing functionality
+✅ Clarity v3 compliant with full validation

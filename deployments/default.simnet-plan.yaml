@@ -62,6 +62,6 @@ plan:
         - emulated-contract-publish:
             contract-name: Prescription-Verification-via-NFTs
             emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            path: "contracts\\Prescription-Verification-via-NFTs.clar"
+            path: contracts/Prescription-Verification-via-NFTs.clar
             clarity-version: 3
       epoch: "3.1"

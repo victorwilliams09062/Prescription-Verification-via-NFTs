@@ -19,6 +19,16 @@
 
 (define-non-fungible-token prescription-nft uint)
 
+(define-map nft-balances
+    { owner: principal }
+    { count: uint }
+)
+
+(define-map token-uris
+    { id: uint }
+    { uri: (string-utf8 512) }
+)
+
 (define-map prescriptions
     { id: uint }
     {
@@ -88,6 +98,7 @@
 (define-constant err-already-delegated (err u112))
 (define-constant err-not-delegated (err u113))
 (define-constant err-delegation-to-self (err u114))
+(define-constant err-no-such-token (err u115))
 
 (define-public (authorize-doctor (doctor principal))
     (begin
@@ -438,5 +449,79 @@
     })
         delegation (ok delegation)
         err-not-delegated
+    )
+)
+
+(define-read-only (get-last-token-id)
+    (ok (var-get last-prescription-id))
+)
+
+(define-read-only (get-owner (token-id uint))
+    (ok (nft-get-owner? prescription-nft token-id))
+)
+
+(define-read-only (get-balance (owner principal))
+    (ok (get count
+        (default-to { count: u0 } (map-get? nft-balances { owner: owner }))
+    ))
+)
+
+(define-read-only (get-token-uri (token-id uint))
+    (ok (get uri (map-get? token-uris { id: token-id })))
+)
+
+(define-public (transfer
+        (token-id uint)
+        (sender principal)
+        (recipient principal)
+    )
+    (let (
+            (current-owner (unwrap! (nft-get-owner? prescription-nft token-id) err-no-such-token))
+            (sender-balance (get count
+                (default-to { count: u0 }
+                    (map-get? nft-balances { owner: sender })
+                )))
+            (recipient-balance (get count
+                (default-to { count: u0 }
+                    (map-get? nft-balances { owner: recipient })
+                )))
+        )
+        (asserts! (is-eq tx-sender sender) err-not-authorized)
+        (asserts! (is-eq sender current-owner) err-not-owner)
+        (asserts! (not (is-eq sender recipient)) err-transfer-to-self)
+        (try! (nft-transfer? prescription-nft token-id sender recipient))
+        (map-set nft-balances { owner: sender } { count: (- sender-balance u1) })
+        (map-set nft-balances { owner: recipient } { count: (+ recipient-balance u1) })
+        (ok true)
+    )
+)
+
+(define-public (mint-with-uri
+        (recipient principal)
+        (uri (string-utf8 512))
+    )
+    (let (
+            (token-id (+ (var-get last-prescription-id) u1))
+            (recipient-balance (get count
+                (default-to { count: u0 }
+                    (map-get? nft-balances { owner: recipient })
+                )))
+        )
+        (try! (nft-mint? prescription-nft token-id recipient))
+        (map-set token-uris { id: token-id } { uri: uri })
+        (map-set nft-balances { owner: recipient } { count: (+ recipient-balance u1) })
+        (var-set last-prescription-id token-id)
+        (ok token-id)
+    )
+)
+
+(define-public (set-token-uri
+        (token-id uint)
+        (uri (string-utf8 512))
+    )
+    (let ((current-owner (unwrap! (nft-get-owner? prescription-nft token-id) err-no-such-token)))
+        (asserts! (is-eq tx-sender current-owner) err-not-owner)
+        (map-set token-uris { id: token-id } { uri: uri })
+        (ok true)
     )
 )
